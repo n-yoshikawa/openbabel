@@ -5,6 +5,8 @@ set(to_install
     atomtyp.txt
     babel_povray3.inc
     bondtyp.txt
+    cod-fragment.txt
+    cod-index.txt
     eem.txt
     eem2015ba.txt
     eem2015bm.txt
@@ -52,7 +54,6 @@ set(to_install
     svgformat.script
     templates.sdf
     torlib.txt
-    torsion.txt
     types.txt
     UFF.prm
 )

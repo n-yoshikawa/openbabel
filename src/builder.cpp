@@ -69,15 +69,16 @@ namespace OpenBabel
       //
       \endcode
   **/
-  std::map<std::string, double> OBBuilder::_torsion;
+  //std::map<std::string, double> OBBuilder::_torsion;
   std::vector<std::string> OBBuilder::_fragments;
   std::map<std::string, int> OBBuilder::_fragments_index;
   std::map<std::string, std::vector<vector3> > OBBuilder::_fragments_cache;
 
   void OBBuilder::LoadFragments()  {
     // open data/fragments.txt
+    obErrorLog.ThrowError(__FUNCTION__, "Loading COD only fragment database.", obWarning);
     ifstream ifs;
-    if (OpenDatafile(ifs, "fragment-index.txt").length() == 0) {
+    if (OpenDatafile(ifs, "cod-index.txt").length() == 0) {
       obErrorLog.ThrowError(__FUNCTION__, "Cannot open fragment-index.txt", obError);
       return;
     }
@@ -89,7 +90,7 @@ namespace OpenBabel
       _fragments_index[smiles] = index;
     }
 
-    if (OpenDatafile(ifs, "torsion.txt").length() == 0) {
+    /*if (OpenDatafile(ifs, "torsion.txt").length() == 0) {
       obErrorLog.ThrowError(__FUNCTION__, "Cannot open torsion.txt", obError);
       return;
     }
@@ -97,6 +98,7 @@ namespace OpenBabel
     while(ifs >> smiles >> angle) {
       _torsion[smiles] = angle;
     }
+    */
   }
 
   std::vector<vector3> OBBuilder::GetFragmentCoord(std::string smiles) {
@@ -110,7 +112,7 @@ namespace OpenBabel
     }
 
     ifstream ifs;
-    if (OpenDatafile(ifs, "platinum-fragment.txt").length() == 0) {
+    if (OpenDatafile(ifs, "cod-fragment.txt").length() == 0) {
       obErrorLog.ThrowError(__FUNCTION__, "Cannot open platinum-index.txt", obError);
       return coords;
     }
