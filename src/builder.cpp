@@ -70,25 +70,66 @@ namespace OpenBabel
       \endcode
   **/
   //std::map<std::string, double> OBBuilder::_torsion;
-  std::vector<std::string> OBBuilder::_fragments;
-  std::map<std::string, int> OBBuilder::_fragments_index;
-  std::map<std::string, std::vector<vector3> > OBBuilder::_fragments_cache;
+  std::vector<std::string> OBBuilder::_rigid_fragments;
+  std::map<std::string, int> OBBuilder::_rigid_fragments_index;
+  std::map<std::string, std::vector<vector3> > OBBuilder::_rigid_fragments_cache;
+  std::vector<std::pair<OBSmartsPattern*, std::vector<vector3> > > OBBuilder::_ring_fragments;
 
   void OBBuilder::LoadFragments()  {
     // open data/fragments.txt
     obErrorLog.ThrowError(__FUNCTION__, "Loading COD only fragment database.", obWarning);
     ifstream ifs;
     if (OpenDatafile(ifs, "cod-index.txt").length() == 0) {
-      obErrorLog.ThrowError(__FUNCTION__, "Cannot open fragment-index.txt", obError);
+      obErrorLog.ThrowError(__FUNCTION__, "Cannot open cod-index.txt", obError);
       return;
     }
+
+    // Set the locale for number parsing to avoid locale issues: PR#1785463
+    // TODO: Use OpenDatafile()
+    obLocale.SetLocale();
 
     std::string smiles;
     int index;
     while(ifs >> smiles >> index) {
-      _fragments.push_back(smiles);
-      _fragments_index[smiles] = index;
+      _rigid_fragments.push_back(smiles);
+      _rigid_fragments_index[smiles] = index;
     }
+
+    if (OpenDatafile(ifs, "fragments.txt").length() == 0) {
+      obErrorLog.ThrowError(__FUNCTION__, "Cannot open fragments.txt", obError);
+      return;
+    }
+
+    char buffer[BUFF_SIZE];
+    vector<string> vs;
+    OBSmartsPattern *sp = NULL;
+    vector<vector3> coords;
+    while (ifs.getline(buffer, BUFF_SIZE)) {
+      if (buffer[0] == '#') // skip comment line (at the top)
+        continue;
+
+      tokenize(vs, buffer);
+
+      if (vs.size() == 1) { // SMARTS pattern
+        if (sp != NULL)
+          _ring_fragments.push_back(pair<OBSmartsPattern*, vector<vector3> > (sp, coords));
+
+        coords.clear();
+        sp = new OBSmartsPattern;
+        if (!sp->Init(vs[0])) {
+          delete sp;
+          sp = NULL;
+          obErrorLog.ThrowError(__FUNCTION__, " Could not parse SMARTS from contribution data file", obInfo);
+        }
+      } else if (vs.size() == 3) { // XYZ coordinates
+        vector3 coord(atof(vs[0].c_str()), atof(vs[1].c_str()), atof(vs[2].c_str()));
+        coords.push_back(coord);
+      }
+    }
+    _ring_fragments.push_back(pair<OBSmartsPattern*, vector<vector3> > (sp, coords));
+
+    // return the locale to the original one
+    obLocale.RestoreLocale();
 
     /*if (OpenDatafile(ifs, "torsion.txt").length() == 0) {
       obErrorLog.ThrowError(__FUNCTION__, "Cannot open torsion.txt", obError);
@@ -102,12 +143,12 @@ namespace OpenBabel
   }
 
   std::vector<vector3> OBBuilder::GetFragmentCoord(std::string smiles) {
-    if (_fragments_cache.count(smiles) > 0) {
-      return _fragments_cache[smiles];
+    if (_rigid_fragments_cache.count(smiles) > 0) {
+      return _rigid_fragments_cache[smiles];
     }
 
     std::vector<vector3> coords;
-    if (_fragments_index.count(smiles) == 0) {
+    if (_rigid_fragments_index.count(smiles) == 0) {
       return coords;
     }
 
@@ -118,7 +159,7 @@ namespace OpenBabel
     }
 
     ifs.clear();
-    ifs.seekg(_fragments_index[smiles]);
+    ifs.seekg(_rigid_fragments_index[smiles]);
     char buffer[BUFF_SIZE];
     vector<string> vs;
     while (ifs.getline(buffer, BUFF_SIZE)) {
@@ -1010,6 +1051,15 @@ namespace OpenBabel
     if (workMol.GetDimension() == 2)
       workMol.SetDimension(0);
 
+    // Count the number of ring atoms.
+    unsigned int ratoms = 0;
+    FOR_ATOMS_OF_MOL(a, mol)
+      if (a->IsInRing()) {
+        ratoms++;
+        if (_keeprings) // Mark these as fragments
+          vfrag.SetBitOn(a->GetIdx());
+      }
+
     // Delete all bonds in the working molecule
     // (we will add them back at the end)
     while (workMol.NumBonds())
@@ -1046,13 +1096,86 @@ namespace OpenBabel
     // Separate each disconnected fragments as different molecules
     vector<OBMol> fragments = mol_copy.Separate(); 
 
-    //datafile is read only on first use of Build()
-    if(_fragments.empty())
+    // datafile is read only on first use of Build()
+    if(_rigid_fragments.empty())
       LoadFragments();
 
+    // Look for ring fragments first
+    if (ratoms && !_keeprings) {
+      vector<pair<OBSmartsPattern*, vector<vector3 > > >::iterator i;
+      // Skip all fragments that are too big to match
+      // Note: It would be faster to compare to the size of the largest
+      //       isolated ring system instead of comparing to ratoms
+      for (i = _ring_fragments.begin();i != _ring_fragments.end() && i->first->NumAtoms() > ratoms;++i);
+
+      // Loop through  the remaining fragments and assign the coordinates from
+      // the first (most complex) fragment.
+      // Stop if there are no unassigned ring atoms (ratoms).
+      for (;i != _ring_fragments.end() && ratoms;++i) {
+
+        if (i->first != NULL && i->first->Match(mol)) {
+          mlist = i->first->GetUMapList();
+
+          for (j = mlist.begin();j != mlist.end();++j) { // for all matches
+
+            // Have any atoms of this match already been added?
+            int alreadydone = 0;
+            int match_idx = 0;
+            for (k = j->begin(); k != j->end(); ++k) // for all atoms of the fragment
+              if (vfrag.BitIsSet(*k)) {
+                alreadydone += 1;
+                if (alreadydone > 1) break;
+                match_idx = *k;
+              }
+            bool spiro = false;
+            if (alreadydone > 1) // At least two atoms of the found match have already been added
+              continue;
+            else if (alreadydone == 1) {
+              spiro = IsSpiroAtom(mol.GetAtom(match_idx)->GetId(), mol);
+              if (!spiro) continue;
+            }
+
+            ratoms += alreadydone - static_cast<int> (j->size()); // Update the number of available ring atoms
+            for (k = j->begin(); k != j->end(); ++k)
+              vfrag.SetBitOn(*k); // Set vfrag for all atoms of fragment
+
+            if (spiro) {
+              vector<int> match_indices(1); // In future, it could be of longer length
+              match_indices[0] = match_idx;
+              ConnectFrags(mol, workMol, *j, i->second, match_indices);
+            }
+            else {
+              int counter;
+              for (k = j->begin(), counter=0; k != j->end(); ++k, ++counter) { // for all atoms of the fragment
+                // set coordinates for atoms
+                OBAtom *atom = workMol.GetAtom(*k);
+                atom->SetVector(i->second[counter]);
+              }
+            }
+
+            // add the bonds for the fragment
+            int index2;
+            for (k = j->begin(); k != j->end(); ++k) {
+              OBAtom *atom1 = mol.GetAtom(*k);
+
+              for (k2 = j->begin(); k2 != j->end(); ++k2) {
+                index2 = *k2;
+                OBAtom *atom2 = mol.GetAtom(index2);
+                OBBond *bond = atom1->GetBond(atom2);
+
+                if (bond != NULL)
+                  workMol.AddBond(*bond);
+              }
+            }
+          }
+        }
+      }
+    } // if (ratoms)
+
+    // Next, look for rigid fragments
     for(vector<OBMol>::iterator f=fragments.begin(); f!=fragments.end(); f++) {
       std::string fragment_smiles = conv.WriteString(&*f, true);
-      if (_fragments_index.count(fragment_smiles) == 0) 
+      if (_rigid_fragments_index.count(fragment_smiles) == 0) 
         continue;
       OBSmartsPattern sp;
       if (!sp.Init(fragment_smiles)) {
@@ -1063,13 +1186,13 @@ namespace OpenBabel
         mlist = sp.GetUMapList();
         for (j = mlist.begin(); j != mlist.end(); ++j) {
           // Have any atoms of this match already been added?
-          int alreadydone = 0;
+          bool alreadydone = false;
           for (k = j->begin(); k != j->end(); ++k)
             if (vfrag.BitIsSet(*k)) {
-              alreadydone += 1;
-              if (alreadydone >= 1) break;
+              alreadydone = true;
+              break;
             }
-          if (alreadydone >= 1) continue;
+          if (alreadydone) continue;
 
           for (k = j->begin(); k != j->end(); ++k)
             vfrag.SetBitOn(*k); // Set vfrag for all atoms of fragment
