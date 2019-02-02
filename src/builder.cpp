@@ -1093,62 +1093,15 @@ namespace OpenBabel
 
 
     for(vector<OBMol>::iterator f=fragments.begin(); f!=fragments.end(); f++) {
-      std::string fragment_smiles = conv.WriteString(&*f, true);
-      // if rigid fragment is in database
-      if (_rigid_fragments_index.count(fragment_smiles) > 0) {
-        OBSmartsPattern sp;
-        if (!sp.Init(fragment_smiles)) {
-          obErrorLog.ThrowError(__FUNCTION__, " Could not parse SMARTS from contribution data file", obInfo);
-          continue;
+      // Count the number of ring atoms.
+      unsigned int ratoms = 0;
+      FOR_ATOMS_OF_MOL(a, mol) {
+        if (a->IsInRing()) {
+          ratoms++;
         }
-        if (sp.Match(mol)) { // for all matches
-          mlist = sp.GetUMapList();
-          for (j = mlist.begin(); j != mlist.end(); ++j) {
-            // Have any atoms of this match already been added?
-            bool alreadydone = false;
-            for (k = j->begin(); k != j->end(); ++k)
-              if (vfrag.BitIsSet(*k)) {
-                alreadydone = true;
-                break;
-              }
-            if (alreadydone) continue;
+      }
 
-            for (k = j->begin(); k != j->end(); ++k)
-              vfrag.SetBitOn(*k); // Set vfrag for all atoms of fragment
-
-            int counter;
-            std::vector<vector3> coords = GetFragmentCoord(fragment_smiles);
-            for (k = j->begin(), counter=0; k != j->end(); ++k, ++counter) { // for all atoms of the fragment
-              // set coordinates for atoms
-              OBAtom *atom = workMol.GetAtom(*k);
-              atom->SetVector(coords[counter]);
-            }
-
-            // add the bonds for the fragment
-            int index2;
-            for (k = j->begin(); k != j->end(); ++k) {
-              OBAtom *atom1 = mol.GetAtom(*k);
-              for (k2 = j->begin(); k2 != j->end(); ++k2) {
-                int index2 = *k2;
-                OBAtom *atom2 = mol.GetAtom(index2);
-                OBBond *bond = atom1->GetBond(atom2);
-                if (bond != NULL) {
-                  workMol.AddBond(*bond);
-                }
-              }
-            }
-          }
-        }
-      } /*else {    // if rigid fragment is not in database
-        // Count the number of ring atoms.
-        unsigned int ratoms = 0;
-        FOR_ATOMS_OF_MOL(a, mol) {
-          if (a->IsInRing()) {
-            ratoms++;
-          }
-        }
-
-        if (ratoms == 0) continue;
+      if (ratoms > 0) {
         vector<pair<OBSmartsPattern*, vector<vector3 > > >::iterator i;
         // Skip all fragments that are too big to match
         // Note: It would be faster to compare to the size of the largest
@@ -1215,7 +1168,54 @@ namespace OpenBabel
             }
           }
         }
-      }*/
+      }
+      std::string fragment_smiles = conv.WriteString(&*f, true);
+      // if rigid fragment is in database
+      if (_rigid_fragments_index.count(fragment_smiles) > 0) {
+        OBSmartsPattern sp;
+        if (!sp.Init(fragment_smiles)) {
+          obErrorLog.ThrowError(__FUNCTION__, " Could not parse SMARTS from contribution data file", obInfo);
+          continue;
+        }
+        if (sp.Match(mol)) { // for all matches
+          mlist = sp.GetUMapList();
+          for (j = mlist.begin(); j != mlist.end(); ++j) {
+            // Have any atoms of this match already been added?
+            bool alreadydone = false;
+            for (k = j->begin(); k != j->end(); ++k)
+              if (vfrag.BitIsSet(*k)) {
+                alreadydone = true;
+                break;
+              }
+            if (alreadydone) continue;
+
+            for (k = j->begin(); k != j->end(); ++k)
+              vfrag.SetBitOn(*k); // Set vfrag for all atoms of fragment
+
+            int counter;
+            std::vector<vector3> coords = GetFragmentCoord(fragment_smiles);
+            for (k = j->begin(), counter=0; k != j->end(); ++k, ++counter) { // for all atoms of the fragment
+              // set coordinates for atoms
+              OBAtom *atom = workMol.GetAtom(*k);
+              atom->SetVector(coords[counter]);
+            }
+
+            // add the bonds for the fragment
+            int index2;
+            for (k = j->begin(); k != j->end(); ++k) {
+              OBAtom *atom1 = mol.GetAtom(*k);
+              for (k2 = j->begin(); k2 != j->end(); ++k2) {
+                int index2 = *k2;
+                OBAtom *atom2 = mol.GetAtom(index2);
+                OBBond *bond = atom1->GetBond(atom2);
+                if (bond != NULL) {
+                  workMol.AddBond(*bond);
+                }
+              }
+            }
+          }
+        }
+      }
     } // for all fragments
 
     // iterate over all atoms to place them in 3D space
