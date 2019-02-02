@@ -159,17 +159,23 @@ namespace OpenBabel
     }
 
     ifs.clear();
-    ifs.seekg(_rigid_fragments_index[smiles]);
+    //ifs.seekg(_rigid_fragments_index[smiles]);
     char buffer[BUFF_SIZE];
     vector<string> vs;
+    bool isTarget = false;
     while (ifs.getline(buffer, BUFF_SIZE)) {
       tokenize(vs, buffer);
-      if (vs.size() == 4) { // XYZ coordinates
+      if (vs.size() == 1) { // SMARTS pattern
+        if(isTarget) break;
+        if(vs[0] == smiles) {
+          isTarget = true;
+          //cout << "Fragment found: "<< vs[0] << endl;
+        }
+      }
+      if (isTarget && vs.size() == 4) { // XYZ coordinates
         vector3 coord(atof(vs[1].c_str()), atof(vs[2].c_str()), atof(vs[3].c_str()));
         coords.push_back(coord);
-      } else if (vs.size() == 1) { // SMARTS pattern
-        break;
-      }
+      } 
     }
     return coords;
   }
