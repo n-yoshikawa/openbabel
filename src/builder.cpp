@@ -1139,7 +1139,7 @@ namespace OpenBabel
             }
           }
         }
-      } else {    // if rigid fragment is not in database
+      } /*else {    // if rigid fragment is not in database
         // Count the number of ring atoms.
         unsigned int ratoms = 0;
         FOR_ATOMS_OF_MOL(a, mol) {
@@ -1215,7 +1215,7 @@ namespace OpenBabel
             }
           }
         }
-      }
+      }*/
     } // for all fragments
 
     // iterate over all atoms to place them in 3D space
