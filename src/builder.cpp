@@ -1094,8 +1094,17 @@ namespace OpenBabel
 
     for(vector<OBMol>::iterator f = fragments.begin(); f != fragments.end(); ++f) {
       std::string fragment_smiles = conv.WriteString(&*f, true);
+      bool isBig = (f->NumAtoms() >= 5);
+      if (isBig) {
+        obErrorLog.ThrowError(__FUNCTION__, "Processing a fragment: "+fragment_smiles, obWarning);
+      }
       // if rigid fragment is in database
       if (_rigid_fragments_index.count(fragment_smiles) > 0) {
+        if (isBig) {
+          obErrorLog.ThrowError(__FUNCTION__, "Found a rigid fragment: "+fragment_smiles, obWarning);
+        } else {
+          obErrorLog.ThrowError(__FUNCTION__, "Something is wrong: "+fragment_smiles, obWarning);
+        }
         OBSmartsPattern sp;
         if (!sp.Init(fragment_smiles)) {
           obErrorLog.ThrowError(__FUNCTION__, " Could not parse SMARTS from fragment", obInfo);
@@ -1138,6 +1147,7 @@ namespace OpenBabel
           }
         }
       } else {    // if rigid fragment is not in database
+      	bool isMatched = false;
         // Count the number of ring atoms.
         unsigned int ratoms = 0;
         FOR_ATOMS_OF_MOL(a, mol) {
@@ -1146,7 +1156,11 @@ namespace OpenBabel
           }
         }
 
-        if (ratoms == 0) continue;
+        //if (ratoms == 0) continue;
+        if (ratoms == 0 && isBig) {
+          obErrorLog.ThrowError(__FUNCTION__, "Fragment not found: "+fragment_smiles, obWarning);
+          continue;
+        }
         vector<pair<OBSmartsPattern*, vector<vector3 > > >::iterator i;
         // Skip all fragments that are too big to match
         // Note: It would be faster to compare to the size of the largest
@@ -1158,6 +1172,7 @@ namespace OpenBabel
         // Stop if there are no unassigned ring atoms (ratoms).
         for (; i != _ring_fragments.end() && ratoms; ++i) {
           if (i->first != NULL && i->first->Match(*f)) { // if match to fragment
+	    isMatched = true;
             i->first->Match(mol);                        // match over mol
             mlist = i->first->GetUMapList();
             for (j = mlist.begin();j != mlist.end();++j) { // for all matches
@@ -1190,6 +1205,13 @@ namespace OpenBabel
                 }
               }
             }
+          }
+        }
+        if (isBig) {
+          if (isMatched) {
+            obErrorLog.ThrowError(__FUNCTION__, "Found a ring fragment: "+fragment_smiles, obWarning);
+          } else {
+            obErrorLog.ThrowError(__FUNCTION__, "Fragment not found: "+fragment_smiles, obWarning);
           }
         }
       }
