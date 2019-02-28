@@ -1172,6 +1172,7 @@ namespace OpenBabel
         // Stop if there are no unassigned ring atoms (ratoms).
         for (; i != _ring_fragments.end() && ratoms; ++i) {
           if (i->first != NULL && i->first->Match(*f)) { // if match to fragment
+            obErrorLog.ThrowError(__FUNCTION__, " Matched a ring fragment: "+i->first->GetSMARTS(), obWarning);
 	    isMatched = true;
             i->first->Match(mol);                        // match over mol
             mlist = i->first->GetUMapList();
