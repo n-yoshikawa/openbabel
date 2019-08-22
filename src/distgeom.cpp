@@ -40,7 +40,6 @@ GNU General Public License for more details.
 #include <sstream>
 #include <string>
 #include <cmath>
-#include <random>
 #include <Eigen/Core>
 #include <Eigen/Eigenvalues>
 
@@ -230,7 +229,7 @@ namespace OpenBabel {
           unsigned long idx = path[a];
           OBAtom* atom = _mol.GetAtom(idx);
 
-          vector<unsigned long> nbrs = {idx-1};
+          vector<unsigned long> nbrs(1, idx-1);
           FOR_NBORS_OF_ATOM(b, &*atom) {
             nbrs.push_back(b->GetIdx()-1);
           }
@@ -885,7 +884,7 @@ namespace OpenBabel {
 
           if (u_bc < l_bc) {
             _d->SetUpperBounds(b, c, l_bc);
-            obErrorLog.ThrowError(__FUNCTION__, "Triagle Smoothing: Erroneous Bounds.", obWarning);
+            //obErrorLog.ThrowError(__FUNCTION__, "Triagle Smoothing: Erroneous Bounds.", obWarning);
           }
 
         } // loop(c)
@@ -1009,14 +1008,13 @@ namespace OpenBabel {
     unsigned int N = _mol.NumAtoms();
     // random distance matrix
     Eigen::MatrixXd distMat = Eigen::MatrixXd::Zero(N, N);
-    std::random_device rnd;
-    std::mt19937 mt(rnd());
+    OBRandom generator;
+    generator.TimeSeed();
     for (size_t i=0; i<N; ++i) {
       for(size_t j=0; j<i; ++j) {
         double lb = _d->GetLowerBounds(i, j);
         double ub = _d->GetUpperBounds(i, j);
-        std::uniform_real_distribution<> unif(lb, ub);
-        double v = unif(mt);
+        double v = generator.NextFloat() * (ub - lb) + lb;
         distMat(i, j) = v;
         distMat(j, i) = v;
       }
@@ -1099,7 +1097,7 @@ namespace OpenBabel {
 
     LBFGSpp::LBFGSParam<double> param;
     param.epsilon = 1e-6;
-    param.max_iterations = 10000;
+    param.max_iterations = 1000;
 
     // Create solver and function object
     LBFGSpp::LBFGSSolver<double> solver(param);
@@ -1107,8 +1105,8 @@ namespace OpenBabel {
 
     double fx;
     int niter = solver.minimize(fun, _coord, fx);
-    std::cout << niter << " iterations" << std::endl;
-    std::cout << "f(x) = " << fx << std::endl;
+    //std::cout << niter << " iterations" << std::endl;
+    //std::cout << "f(x) = " << fx << std::endl;
 
     for(size_t i=0; i<N; ++i) {
       vector3 v(_coord(i*dim), _coord(i*dim+1), _coord(i*dim+2));
@@ -1145,15 +1143,15 @@ namespace OpenBabel {
 
     LBFGSpp::LBFGSParam<double> param;
     param.epsilon = 1e-6;
-    param.max_iterations = 10000;
+    param.max_iterations = 2000;
 
     LBFGSpp::LBFGSSolver<double> solver(param);
     DistGeomFunc4D fun(this);
 
     double fx;
     int niter = solver.minimize(fun, _coord, fx);
-    std::cout << niter << " iterations" << std::endl;
-    std::cout << "f(x) = " << fx << std::endl;
+    //std::cout << niter << " iterations" << std::endl;
+    //std::cout << "f(x) = " << fx << std::endl;
 
     for(size_t i=0; i<N; ++i) {
       vector3 v(_coord(i*dim), _coord(i*dim+1), _coord(i*dim+2));
