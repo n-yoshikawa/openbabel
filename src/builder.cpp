@@ -1117,6 +1117,9 @@ namespace OpenBabel
       OBMol *fragment = &(fragments[it->second]);
       std::string fragment_smiles = conv.WriteString(&(*fragment), true);
       std::cout << "fragment: " << fragment_smiles << std::endl;
+      fragment->DeleteHydrogens();
+      fragment_smiles = conv.WriteString(&(*fragment), true);
+      std::cout << "fragment: " << fragment_smiles << std::endl;
       if ((*fragment).NumHvyAtoms() < 5) {
         std::cout << "continue" << std::endl;
         continue;
@@ -1135,6 +1138,7 @@ namespace OpenBabel
 
       sp.Match(mol);
       vector<vector<int> > mlist_mol = sp.GetUMapList();
+      cout << "Number of match: " << mlist_mol.size() << endl;
       for (j = mlist_mol.begin(); j != mlist_mol.end(); ++j) {
         // check whether this match is included in other fragment
         bool isIncluded = false;
