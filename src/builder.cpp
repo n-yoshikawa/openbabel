@@ -1075,8 +1075,8 @@ namespace OpenBabel
     workMol.SetHybridizationPerceived();
 
 
-    // I think just deleting rotable bond and separate is enough,
-    // but it did not work.
+    // In order to treat hydrogen counts properly, CopySubstructure was used
+    // instead of just deleting rotatable bonds
 
     // Get fragments using CopySubstructure
     // Copy all atoms
@@ -1093,12 +1093,18 @@ namespace OpenBabel
       }
     }
 
-    // Generate fragments by copy
+    // Generate fragments
+    // two types of fragments are generated
+    // fragments: fragment inside fragment library (with implicit H)
+    // raw_fragments: fragment inside molecule (without implicit H)
     OBMol mol_copy;
+    // default: Adjust the implicit hydrogen count
     mol.CopySubstructure(mol_copy, &atomsToCopy, &bondsToExclude);
-
-    // Separate each disconnected fragments as different molecules
     vector<OBMol> fragments = mol_copy.Separate();
+    // correctvalence = 0: Leave the implicit hydrogen count unchanged
+    OBMol mol_copy2;
+    mol.CopySubstructure(mol_copy2, &atomsToCopy, &bondsToExclude, 0);
+    vector<OBMol> raw_fragments = mol_copy2.Separate();
 
     // datafile is read only on first use of Build()
     if(_rigid_fragments.empty())
@@ -1115,11 +1121,11 @@ namespace OpenBabel
     for(vector<pair<unsigned int, size_t> >::iterator it = fragSizeList.begin();
         it != fragSizeList.end(); ++it) {
       OBMol *fragment = &(fragments[it->second]);
+      OBMol *raw_fragment = &(raw_fragments[it->second]);
       std::string fragment_smiles = conv.WriteString(&(*fragment), true);
       std::cout << "fragment: " << fragment_smiles << std::endl;
-      fragment->DeleteHydrogens();
-      fragment_smiles = conv.WriteString(&(*fragment), true);
-      std::cout << "fragment: " << fragment_smiles << std::endl;
+      std::string raw_fragment_smiles = conv.WriteString(&(*raw_fragment), true);
+      std::cout << "raw fragment: " << raw_fragment_smiles << std::endl;
       if ((*fragment).NumHvyAtoms() < 5) {
         std::cout << "continue" << std::endl;
         continue;
@@ -1129,7 +1135,7 @@ namespace OpenBabel
       OBDistanceGeometry dg;
       dg.GetGeometry(*fragment, false);
       OBSmartsPattern sp;
-      if(!sp.Init(fragment_smiles)) {
+      if(!sp.Init(raw_fragment_smiles)) {
         obErrorLog.ThrowError(__FUNCTION__, " Could not parse SMARTS from fragment", obInfo);
       } 
       sp.Match(*fragment);
