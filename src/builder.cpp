@@ -32,6 +32,7 @@ GNU General Public License for more details.
 #include <openbabel/locale.h>
 #include <openbabel/distgeom.h>
 #include <openbabel/elements.h>
+#include <openbabel/forcefield.h>
 
 #include <openbabel/stereo/stereo.h>
 #include <openbabel/stereo/cistrans.h>
@@ -1052,6 +1053,8 @@ namespace OpenBabel
 
     OBConversion conv;
     conv.SetOutFormat("can"); // Canonical SMILES
+    std::string mol_smiles = conv.WriteString(&mol, true);
+    cout << mol_smiles << endl;
 
     // Trigger hybridisation perception now so it will be copied to workMol
     mol.GetFirstAtom()->GetHyb();
@@ -1121,30 +1124,52 @@ namespace OpenBabel
     for(vector<pair<unsigned int, size_t> >::iterator it = fragSizeList.begin();
         it != fragSizeList.end(); ++it) {
       OBMol *fragment = &(fragments[it->second]);
+      std::string fragment_smiles = conv.WriteString(fragment, true);
       OBMol *raw_fragment = &(raw_fragments[it->second]);
-      std::string fragment_smiles = conv.WriteString(&(*fragment), true);
-      std::cout << "fragment: " << fragment_smiles << std::endl;
-      std::string raw_fragment_smiles = conv.WriteString(&(*raw_fragment), true);
-      std::cout << "raw fragment: " << raw_fragment_smiles << std::endl;
+      std::string raw_fragment_smiles = conv.WriteString(raw_fragment, true);
       if ((*fragment).NumHvyAtoms() < 5) {
-        std::cout << "continue" << std::endl;
         continue;
       }
 
 #ifdef HAVE_EIGEN      
       OBDistanceGeometry dg;
       dg.GetGeometry(*fragment, false);
+      fragment->SetDimension(3);
+      fragment->AddHydrogens(false, false);
+      bool runFF = true;
+      OBForceField* pFF = OBForceField::FindForceField("MMFF94");
+      if (!pFF)
+        runFF = false;
+      if (!pFF->Setup(*fragment)) {
+        pFF = OBForceField::FindForceField("UFF");
+        if (!pFF || !pFF->Setup(*fragment)) runFF = false;
+      }
+      if (runFF) {
+        pFF->EnableCutOff(true);
+        pFF->SetVDWCutOff(10.0);
+        pFF->SetElectrostaticCutOff(20.0);
+        pFF->SetUpdateFrequency(10); // update non-bonded distances infrequently
+        int iterations = 100;
+        pFF->ConjugateGradients(iterations, 1.0e-4);
+        //pFF->FastRotorSearch(false);
+        //pFF->ConjugateGradients(iterations, 1.0e-6);
+        pFF->UpdateCoordinates(*fragment);
+      }
+
       OBSmartsPattern sp;
       if(!sp.Init(raw_fragment_smiles)) {
         obErrorLog.ThrowError(__FUNCTION__, " Could not parse SMARTS from fragment", obInfo);
       } 
-      sp.Match(*fragment);
+      if(!sp.Match(*fragment)) {
+        cerr << "Raw fragment did not match fragment" << endl;
+        std::cerr << "fragment: " << fragment_smiles << std::endl;
+        std::cerr << "raw fragment: " << raw_fragment_smiles << std::endl;
+        continue;
+      }
       vector<vector<int> > mlist_frag = sp.GetUMapList();
-      assert(mlist_frag.size() == 1);
 
       sp.Match(mol);
       vector<vector<int> > mlist_mol = sp.GetUMapList();
-      cout << "Number of match: " << mlist_mol.size() << endl;
       for (j = mlist_mol.begin(); j != mlist_mol.end(); ++j) {
         // check whether this match is included in other fragment
         bool isIncluded = false;
@@ -1152,7 +1177,6 @@ namespace OpenBabel
           if(vfrag.BitIsSet(*k)) isIncluded = true;
         }
         if (isIncluded) {
-          cerr << "Included in other fragment" << endl;
           continue;
         }
         for (k = j->begin(); k != j->end(); ++k) {
@@ -1162,8 +1186,8 @@ namespace OpenBabel
              k != j->end() && p != mlist_frag.begin()->end();
              ++k, ++p) { // for all atoms of the fragment
           // set coordinates for atoms
-          cout << "p: " << *p << "(" << fragment->GetAtom(*p)->GetAtomicNum() << ")"
-               << ", k: " << *k << "(" << workMol.GetAtom(*k)->GetAtomicNum() << ")" << endl;
+          /*cout << "p: " << *p << "(" << fragment->GetAtom(*p)->GetAtomicNum() << ")"
+               << ", k: " << *k << "(" << workMol.GetAtom(*k)->GetAtomicNum() << ")" << endl;*/
           OBAtom *atom = workMol.GetAtom(*k);
           atom->SetVector(fragment->GetAtom(*p)->GetVector());
         }
@@ -1248,6 +1272,7 @@ namespace OpenBabel
 
     // Make sure we keep the bond indexes the same
     // so we'll delete the bonds again and copy them
+   from /usr/local/lib/libopenbabel.so.5
     // Fixes PR#3448379 (and likely other topology issues)
     while (workMol.NumBonds())
       workMol.DeleteBond(workMol.GetBond(0));
