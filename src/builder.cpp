@@ -1028,6 +1028,31 @@ namespace OpenBabel
     return fragment;
   }
 
+  vector<OBMol> getFragments(OBMol& mol, std::vector<std::vector<unsigned int> > *fragmentAtoms) {
+    vector<OBMol> result;
+
+    OBMolAtomDFSIter iter(mol);
+    OBMol newMol;
+    fragmentAtoms->clear();
+    while( iter ) {
+      OBBitVec infragment(mol.NumAtoms()+1);
+      OBBitVec bondsToExclude(mol.NumAtoms()+1);
+
+      do { //for each atom in fragment
+        infragment.SetBitOn(iter->GetIdx());
+      } while ((iter++).next());
+
+      std::vector<unsigned int> atomorder, bondorder;
+      mol.CopySubstructure(newMol, &infragment, &bondsToExclude, 1, &atomorder, &bondorder);
+
+      result.push_back( newMol );
+      fragmentAtoms->push_back(atomorder);
+      newMol.Clear();
+    }
+
+    return result;
+  }
+
   // First we find the most complex fragments in our molecule. Once we have a match,
   // vfrag is set for all the atoms in the fragment. A second match (smaller, more
   // simple part of the 1st match) is ignored.
@@ -1096,46 +1121,47 @@ namespace OpenBabel
       }
     }
 
+
     // Generate fragments
     // two types of fragments are generated
     // fragments: fragment inside fragment library (with implicit H)
     // raw_fragments: fragment inside molecule (without implicit H)
     OBMol mol_copy;
+    std::vector<unsigned int> atomorder, bondorder;
     // default: Adjust the implicit hydrogen count
-    mol.CopySubstructure(mol_copy, &atomsToCopy, &bondsToExclude);
-    vector<OBMol> fragments = mol_copy.Separate();
-    // correctvalence = 0: Leave the implicit hydrogen count unchanged
+    mol.CopySubstructure(mol_copy, &atomsToCopy, &bondsToExclude, 1, &atomorder, &bondorder);
+    //vector<OBMol> fragments = mol_copy.Separate();
     OBMol mol_copy2;
     mol.CopySubstructure(mol_copy2, &atomsToCopy, &bondsToExclude, 0);
     vector<OBMol> raw_fragments = mol_copy2.Separate();
 
-    // datafile is read only on first use of Build()
-    if(_rigid_fragments.empty())
-      LoadFragments();
-
-
-    // Sort fragments from biggest to smallest
-    std::vector<pair<unsigned int, size_t> > fragSizeList;
+    vector<vector<unsigned int> > fragmentAtoms;
+    vector<OBMol> fragments = getFragments(mol_copy, &fragmentAtoms);
     for(size_t i = 0; i < fragments.size(); ++i) {
-      fragSizeList.push_back(make_pair(fragments[i].NumHvyAtoms(), i));
+      cout << conv.WriteString(&fragments[i], true) << endl;
+      for(auto x : fragmentAtoms[i]) {
+        cout << x << " ";
+      }
+      cout << endl;
     }
-    std::sort(fragSizeList.rbegin(), fragSizeList.rend());
 
-    for(vector<pair<unsigned int, size_t> >::iterator it = fragSizeList.begin();
-        it != fragSizeList.end(); ++it) {
-      OBMol *fragment = &(fragments[it->second]);
+    // datafile is read only on first use of Build()
+    // Sort fragments from biggest to smallest
+    for(size_t i = 0; i < fragments.size(); ++i) {
+      OBMol *fragment = &(fragments[i]);
+      OBMol *raw_fragment = &(raw_fragments[i]);
       std::string fragment_smiles = conv.WriteString(fragment, true);
-      OBMol *raw_fragment = &(raw_fragments[it->second]);
       std::string raw_fragment_smiles = conv.WriteString(raw_fragment, true);
-      if ((*fragment).NumHvyAtoms() < 5) {
+      if ((*fragment).NumHvyAtoms() < 3) {
         continue;
       }
 
-#ifdef HAVE_EIGEN      
+      cout << fragment_smiles << endl;
       OBDistanceGeometry dg;
       dg.GetGeometry(*fragment, false);
       fragment->SetDimension(3);
       fragment->AddHydrogens(false, false);
+
       bool runFF = true;
       OBForceField* pFF = OBForceField::FindForceField("MMFF94");
       if (!pFF)
@@ -1156,54 +1182,36 @@ namespace OpenBabel
         pFF->UpdateCoordinates(*fragment);
       }
 
-      OBSmartsPattern sp;
-      if(!sp.Init(raw_fragment_smiles)) {
-        obErrorLog.ThrowError(__FUNCTION__, " Could not parse SMARTS from fragment", obInfo);
-      } 
-      if(!sp.Match(*fragment)) {
-        cerr << "Raw fragment did not match fragment" << endl;
-        std::cerr << "fragment: " << fragment_smiles << std::endl;
-        std::cerr << "raw fragment: " << raw_fragment_smiles << std::endl;
+      // May be this is not needed
+      bool isIncluded = false;
+      for(unsigned int j = 0; j < fragmentAtoms[i].size(); ++j) {
+        unsigned int k = fragmentAtoms[i][j];
+        if(vfrag.BitIsSet(k)) isIncluded = true;
+      }
+      if (isIncluded) {
         continue;
       }
-      vector<vector<int> > mlist_frag = sp.GetUMapList();
 
-      sp.Match(mol);
-      vector<vector<int> > mlist_mol = sp.GetUMapList();
-      for (j = mlist_mol.begin(); j != mlist_mol.end(); ++j) {
-        // check whether this match is included in other fragment
-        bool isIncluded = false;
-        for (k = j->begin(); k != j->end(); ++k) {
-          if(vfrag.BitIsSet(*k)) isIncluded = true;
-        }
-        if (isIncluded) {
-          continue;
-        }
-        for (k = j->begin(); k != j->end(); ++k) {
-          vfrag.SetBitOn(*k); // Set vfrag for all atoms of fragment
-        }
-        for (k = j->begin(), p = mlist_frag.begin()->begin();
-             k != j->end() && p != mlist_frag.begin()->end();
-             ++k, ++p) { // for all atoms of the fragment
-          // set coordinates for atoms
-          /*cout << "p: " << *p << "(" << fragment->GetAtom(*p)->GetAtomicNum() << ")"
-               << ", k: " << *k << "(" << workMol.GetAtom(*k)->GetAtomicNum() << ")" << endl;*/
-          OBAtom *atom = workMol.GetAtom(*k);
-          atom->SetVector(fragment->GetAtom(*p)->GetVector());
-        }
-        // add the bonds for the fragment
-        for (k = j->begin(); k != j->end(); ++k) {
-          OBAtom *atom1 = mol.GetAtom(*k);
-          for (k2 = j->begin(); k2 != j->end(); ++k2) {
-            OBAtom *atom2 = mol.GetAtom(*k2);
-            OBBond *bond = atom1->GetBond(atom2);
-            if (bond != NULL) {
-              workMol.AddBond(*bond);
-            }
+      for(unsigned int j = 0; j < fragmentAtoms[i].size(); ++j) {
+        unsigned int k = fragmentAtoms[i][j];
+        vfrag.SetBitOn(k); // Set vfrag for all atoms of fragment
+        OBAtom *atom = workMol.GetAtom(k);
+        atom->SetVector(fragment->GetAtom(j+1)->GetVector());
+        cout << "Set " << k << " by " << j+1 << " of fragment " << i << endl;
+      }
+
+      for(unsigned int j = 0; j < fragmentAtoms[i].size(); ++j) {
+        unsigned int k = fragmentAtoms[i][j];
+        OBAtom *atom1 = mol.GetAtom(k);
+        for(unsigned int j2 = 0; j2 < fragmentAtoms[i].size(); ++j2) {
+          unsigned int k2 = fragmentAtoms[i][j2];
+          OBAtom *atom2 = mol.GetAtom(k2);
+          OBBond *bond = atom1->GetBond(atom2);
+          if (bond != NULL) {
+            workMol.AddBond(*bond);
           }
         }
       }
-#endif
     } // for all fragments
 
     // iterate over all atoms to place them in 3D space
@@ -1272,7 +1280,6 @@ namespace OpenBabel
 
     // Make sure we keep the bond indexes the same
     // so we'll delete the bonds again and copy them
-   from /usr/local/lib/libopenbabel.so.5
     // Fixes PR#3448379 (and likely other topology issues)
     while (workMol.NumBonds())
       workMol.DeleteBond(workMol.GetBond(0));
